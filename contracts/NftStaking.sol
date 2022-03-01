@@ -158,9 +158,6 @@ contract Staking is ERC1155Holder {
                     uint paymentPerCycle = calculateRewardsForAMonth(price,currentPlan);
                     uint amount = paymentPerCycle * pendingPayment;
 
-                    if(amount > 0){
-                        amount -= paymentPerCycle;
-                    }
                     balances[msg.sender]  += amount;
                     NFT[i].finalEarnings  -= amount;
                     NFT[i].completedPaymentCycles += pendingPayment;
