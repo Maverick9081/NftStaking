@@ -7,8 +7,6 @@ import "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
 contract Staking is ERC1155Holder {
     uint private nftId;
     uint private month = 2592000;
-    uint private plan;
-    uint private apr;
     IERC1155 private Token;
 
     constructor(address tokenAddress) {
@@ -16,7 +14,6 @@ contract Staking is ERC1155Holder {
     }
 
     struct stakedNft {
-        uint nftId;
         address nftContractAddress;
         uint nftPrice;
         address staker;
@@ -24,37 +21,35 @@ contract Staking is ERC1155Holder {
         uint releaseTime;
         uint plan;
         uint finalEarnings;
-        uint PlanTimeInMonths;
-        uint completedPaymentCycles;
     }
 
     mapping(address =>uint[]) private usersNft; 
     mapping(uint => stakedNft)public NFT;
-    mapping(address => uint) private balances;
 
+    function stakeNft(address nftContractAddress,uint price,uint tokenId,uint months) public {
+        require(IERC1155(nftContractAddress).balanceOf(msg.sender, tokenId) >= 1);
+        require(months == 18 ||
+                months== 24 ||
+                months == 36);
+        IERC1155(nftContractAddress).safeTransferFrom(msg.sender,address(this),tokenId,1,"");
 
-    function stakeNftFor18Months(address nftContractAddress,uint price,uint tokenId) public {
-        uint months =18;
-        uint time = months * month;
-        plan =1;
-        stakeNft(nftContractAddress, price, tokenId, time,plan, months);
+            nftId++;
+            uint plan = getPlan(months);
+            uint finalEarning = calculateRewards(price,plan,months);
+            uint releaseTime = block.timestamp + months * month;
+            NFT[nftId] = stakedNft(
+                nftContractAddress,
+                price,
+                msg.sender,
+                tokenId,
+                releaseTime,
+                plan,
+                finalEarning
+            );
+        usersNft[msg.sender].push(nftId);   
     }
 
-    function stakeNftFor24Months(address nftContractAddress,uint price,uint tokenId) public {
-        uint months = 24;
-        uint time = months * month;
-        plan = 2;
-        stakeNft(nftContractAddress, price, tokenId, time, plan,months);
-    }
-
-    function stakeNftFor36Months(address nftContractAddress,uint price,uint tokenId) public {
-        uint months = 36;
-        uint time = months * month;
-        plan = 3;
-        stakeNft(nftContractAddress, price, tokenId, time, plan,months);
-    }
-
-    function reddemNft(uint nftId) public{
+     function unstakeNft(uint nftId) public{
         
         address user = NFT[nftId].staker;
         require(user == msg.sender);
@@ -62,61 +57,29 @@ contract Staking is ERC1155Holder {
         require(block.timestamp >= timeRemaining);
         address nftContract = NFT[nftId].nftContractAddress;
         uint id = NFT[nftId].tokenId;
-        IERC1155(nftContract).safeTransferFrom(address(this),msg.sender,id,1,"");  
-    }
-
-    function ReddemRewards() public {
-        allocateReward();
-        uint amount = balances[msg.sender];
-        require(amount > 0);
+        IERC1155(nftContract).safeTransferFrom(address(this),msg.sender,id,1,"");
+        uint amount = NFT[nftId].finalEarnings;
         Token.safeTransferFrom(address(this),msg.sender,0,amount,"");
-        balances[msg.sender] -= amount;
     }
-    
 
-    function stakeNft(address nftContractAddress,uint price,uint tokenId,uint time,uint stakingPlan,uint months) internal {
-        require(IERC1155(nftContractAddress).balanceOf(msg.sender, tokenId) >= 1);
-        IERC1155(nftContractAddress).safeTransferFrom(msg.sender,address(this),tokenId,1,"");
+    function getPlan(uint months) internal  returns(uint){
+        
         if(usersNft[msg.sender].length>=1){
-            nftId++;
-            uint plan = 4;
-            uint finalEarning = calculateRewardsForAMonth(price,plan) * months ;
-            uint releaseTime = block.timestamp + time;
-            NFT[nftId] = stakedNft(
-                nftId,
-                nftContractAddress,
-                price,
-                msg.sender,
-                tokenId,
-                releaseTime,
-                plan,
-                finalEarning,
-                months,
-                0
-            );
-            usersNft[msg.sender].push(nftId);
+            return 4;
         }
-        else{
-            nftId++;
-            uint releaseTime = block.timestamp + time;
-            uint finalEarning = calculateRewardsForAMonth(price,stakingPlan) * months ;
-            NFT[nftId] = stakedNft(
-                nftId,
-                nftContractAddress,
-                price,
-                msg.sender,
-                tokenId,
-                releaseTime,
-                stakingPlan,
-                finalEarning,
-                months,
-                0
-            );
-            usersNft[msg.sender].push(nftId);
-        }   
+        if(months == 18){
+            return 1;
+        }
+        if(months == 24){
+            return 2;
+        }
+        if(months == 36){
+            return 3;
+        }    
     }
 
-    function calculateRewardsForAMonth (uint price, uint stakingPlan) internal returns(uint) {
+    function calculateRewards (uint price, uint stakingPlan,uint months) internal view returns(uint) {
+        uint apr;
         if(stakingPlan == 1){
             apr = 50;
         }
@@ -129,43 +92,6 @@ contract Staking is ERC1155Holder {
         else if(stakingPlan == 4){
             apr = 125;
         }
-
-        uint earning = monthlyEarning(apr, price);
-        return earning;
+        return months * apr *price/12000;
     }
-
-    function monthlyEarning (uint Apr,uint price) internal returns(uint){
-        return Apr * price /12000;
-    }
-
-    function allocateReward() internal {
-        uint length = usersNft[msg.sender].length;
-        for(uint i =1 ; i <= length ; i++) {
-            if(NFT[i].finalEarnings > 0){
-                if(block.timestamp > NFT[i].releaseTime){
-                    balances[msg.sender] += NFT[i].finalEarnings;
-                    NFT[i].finalEarnings = 0;
-                }
-                else{ 
-                    uint completedPayment = NFT[i].completedPaymentCycles;
-                    uint time = NFT[i].releaseTime;
-                    uint cycles = NFT[i].PlanTimeInMonths;
-                    uint cyclesLeft = (time - block.timestamp)/month;
-                    uint cyclesCompleted = cycles - cyclesLeft;
-                    uint pendingPayment = cyclesCompleted - completedPayment;
-                    uint price = NFT[i].nftPrice;
-                    uint currentPlan = NFT[i].plan; 
-                    uint paymentPerCycle = calculateRewardsForAMonth(price,currentPlan);
-                    uint amount = paymentPerCycle * pendingPayment;
-
-                    if(amount > 0){
-                        amount -= paymentPerCycle;
-                    }
-                    balances[msg.sender]  += amount;
-                    NFT[i].finalEarnings  -= amount;
-                    NFT[i].completedPaymentCycles += pendingPayment;
-                }
-            }
-        }   
-    }    
 }
